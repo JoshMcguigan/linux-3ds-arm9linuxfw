@@ -20,6 +20,21 @@
 #define PXICMD_MODE_IRQGET	4
 #define PXICMD_MODE_IRQMASK	5
 #define PXICMD_MODE_IRQUNMASK	6
+#define PXICMD_MODE_ITCM_READ	7
+
+/*
+ * ITCM is ARM9-private, so the ARM11 cannot map it. The boot ROM leaves
+ * data there that the ARM11 has legitimate use for, notably the DS cart
+ * Blowfish tables, so expose it read-only.
+ *
+ * The register modes above reach IO by adding 0x10000000 to the 24-bit
+ * offset, which cannot express an ITCM address. This mode uses ITCM as
+ * its base instead. Word reads only; the size field is ignored.
+ *
+ * Read-only on purpose: our own .text lives at the bottom of ITCM.
+ */
+#define ITCM_BASE		0x01FF8000
+#define ITCM_SIZE		0x8000
 
 #define PXICMD_SIZE_BYTE	0
 #define PXICMD_SIZE_HALF	1
@@ -55,6 +70,18 @@ static u32 pxicmd_iord(u32 addr, u32 size) {
 static void pxicmd_process_read(u32 addr, u32 size)
 {
 	pxi_send(pxicmd_iord(addr, size), true);
+}
+
+static void pxicmd_process_itcm_read(u32 off)
+{
+	off &= ~3;
+
+	if (off >= ITCM_SIZE) {
+		pxi_send(0xDEADBEEF, true);
+		return;
+	}
+
+	pxi_send(REG_IO(u32, ITCM_BASE + off), true);
 }
 
 static void pxicmd_process_write(u32 addr, u32 size, u32 arg)
@@ -100,6 +127,9 @@ static void pxicmd_process_one(u32 pxicmd)
 		break;
 	case PXICMD_MODE_IRQUNMASK:
 		CRITICAL_BLOCK( virq_unmask(reg & 0x1F); );
+		break;
+	case PXICMD_MODE_ITCM_READ:
+		pxicmd_process_itcm_read(reg);
 		break;
 	}
 }
